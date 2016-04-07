@@ -72,7 +72,3 @@ fi
 #size= du -sb $directory | awk '{print $1}' #generates size in bytes
 #new_vol= size * 2
 #}
-
-usage
-Instance_Creation
-Terminate_Instance
