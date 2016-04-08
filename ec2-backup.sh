@@ -2,7 +2,6 @@
 Instance_Creation()
 {
 image="ami-fce3c696"
-method="dd"
 default_map=""
 username="ubuntu"
 location=""
@@ -36,12 +35,11 @@ state=`aws ec2 describe-instances --output text --instance-id $instance|grep -i 
 echo $state
 state=`aws ec2 describe-instances --output text --instance-id $instance|grep -i State|awk '{print $3}'`
 echo $state
-
 aws_hostname=`aws ec2 describe-instances --instance-ids $instance|grep ASSOCIATION|awk '{print $3}'|awk 'NR==1'`
 echo $aws_hostname
 echo "ssh -o StrictHostKeyChecking=no ${EC2_BACKUP_FLAGS_SSH} ubuntu@$aws_hostname"
-ssh -o StrictHostKeyChecking=no ${EC2_BACKUP_FLAGS_SSH} ubuntu@$aws_hostname
 }
+
 ### Usage Function
 usage() {
 echo "ec2_backup [-h] [-m method] [-v volume-id] dir "
@@ -70,7 +68,8 @@ if [ ! -d "$directory" ]
                 exit 1
 fi
 
-#To compute the size of directory in GB and then assign to Volume
+# compute the size of directory in GB and then assign to Volume
+
 Calculate_Size()
 {
 size=$(du -sb $directory|awk '{print $1}')
@@ -97,10 +96,14 @@ volsize=`aws ec2 describe-volumes --output text --volume-ids $new_volume_id|awk 
 echo "The size is: $volsize"
 volstatus=`aws ec2 describe-volumes --output text --volume-ids $new_volume_id|awk '{print $6}'`
 echo "The Status is : $volstatus"
+ssh -o StrictHostKeyChecking=no ${EC2_BACKUP_FLAGS_SSH} ubuntu@$aws_hostname sudo mkfs -t ext4 $device_map > /dev/null
+ssh -o StrictHostKeyChecking=no ${EC2_BACKUP_FLAGS_SSH} ubuntu@$aws_hostname sudo mkdir /mount_data > /dev/null
+ssh -o StrictHostKeyChecking=no ${EC2_BACKUP_FLAGS_SSH} ubuntu@$aws_hostname sudo mount $device_map /mount_data > /dev/null
 }
 
 Volume_Detach()
 {
+ssh -o StrictHostKeyChecking=no ${EC2_BACKUP_FLAGS_SSH} ubuntu@$aws_hostname sudo umount /mount_data
 aws ec2 detach-volume --volume-id $new_volume_id --output text >/dev/null
 echo "Volume $new_volume_id has been detached"
 }
@@ -110,9 +113,19 @@ aws ec2 terminate-instances --instance-ids $instance >/dev/null
 echo "Instance Terminated"
 }
 
-Instance_Creation
-Calculate_Size
-Volume_Attach
-Volume_Detach
-Terminate_Instance
-echo $new_volume_id
+
+rsync()
+{
+if [ $method = "rsync" ]
+then
+echo $1
+`rsync -ravh --rsync-path="sudo rsync" -e "ssh $EC2_BACKUP_FLAGS_SSH -o StrictHostKeyChecking=no" $1 $ubuntu@aws_hostname:/mount_data` > /dev/null
+else
+ dd
+fi
+}
+
+dd()
+{
+echo $method
+}
