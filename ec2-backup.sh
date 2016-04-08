@@ -129,3 +129,11 @@ dd()
 {
 echo $method
 }
+
+Instance_Creation
+Calculate_Size
+Volume_Attach
+rsync
+Volume_Detach
+Terminate_Instance
+echo $new_volume_id
