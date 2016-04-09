@@ -48,13 +48,20 @@ echo "ec2_backup [-h] [-m method] [-v volume-id] dir "
 while getopts h:m:v: flag; do
   case "${flag}" in
    h) usage ;;
-   m) if [ $OPTARG = "dd" ] || [ $OPTARG = "rsync" ]; then
+   m) if [ $OPTARG = "dd" ] || [ $OPTARG = "rsync" ]
+      then
           method=$OPTARG
       else
-          echo "Please enter correct method, either dd or rsync"
+          echo "Please enter correct backup method, either dd or rsync"
           exit 1
       fi ;;
-   v) volumeid=$OPTARG;;
+   v) if [[ $OPTARG =~ ^vol- ]]
+      then
+          volumeid=$OPTARG
+      else
+       echo "Please enter correct Volume-id"
+       exit 1
+      fi ;;
     *) echo "`basename ${0}` [-h usage] | [-m method] | [-v volume-id] directory"
            exit 1
            ;;
@@ -69,6 +76,7 @@ if [ ! -d "$directory" ]
                 exit 1
 fi
 
+echo $directory
 # compute the size of directory in GB and then assign to Volume
 
 Calculate_Size()
@@ -87,15 +95,15 @@ fi
 
 Volume_Attach()
 {
-new_volume_id=`aws ec2 create-volume --output text --availability-zone $location --size $new_vol_gb|awk '{print $6}'` >/dev/null
+new_volumeid=`aws ec2 create-volume --output text --availability-zone $location --size $new_vol_gb --volume-type gp2|awk '{print $7}'` >/dev/null
 sleep 10
-aws ec2 attach-volume --volume-id $new_volume_id --instance-id $instance --device $device_map > /dev/null
-echo $new_volume_id
+echo "The new attached volume is $new_volumeid"
+aws ec2 attach-volume --volume-id $new_volumeid --instance-id $instance --device $device_map > /dev/null
 sleep 05
-volsize=`aws ec2 describe-volumes --output text --volume-ids $new_volume_id|awk '{print $4}'`
-echo "The size is: $volsize"
-volstatus=`aws ec2 describe-volumes --output text --volume-ids $new_volume_id|awk '{print $6}'`
-echo "The Status is : $volstatus"
+volsize=`aws ec2 describe-volumes --output text --volume-ids $new_volumeid|grep VOLUMES|awk '{print $5}'`
+echo "Attached volume size is: $volsize"
+volstatus=`aws ec2 describe-volumes --output text --volume-ids $new_volumeid|grep ATTACHMENTS|awk '{print $6}'`
+echo "Attached volume status is : $volstatus"
 echo "The directory is $directory"
 ssh -o StrictHostKeyChecking=no ${EC2_BACKUP_FLAGS_SSH} ubuntu@$aws_hostname sudo mkfs -t ext4 $device_map >/dev/null
 ssh -o StrictHostKeyChecking=no ${EC2_BACKUP_FLAGS_SSH} ubuntu@$aws_hostname sudo mkdir /mount_data > /dev/null
@@ -107,8 +115,8 @@ echo "Mounting is created"
 Volume_Detach()
 {
 ssh -o StrictHostKeyChecking=no ${EC2_BACKUP_FLAGS_SSH} ubuntu@$aws_hostname sudo umount /mount_data
-aws ec2 detach-volume --volume-id $new_volume_id --output text >/dev/null
-echo "Volume $new_volume_id has been detached"
+aws ec2 detach-volume --volume-id $volumeid --output text >/dev/null
+echo "Volume $volumeid has been detached"
 }
 Terminate_Instance()
 {
@@ -143,22 +151,51 @@ Instance_Creation
 Calculate_Size
 echo $volumeid
 if [ ! -z "$volumeid" ]
-then
-  volsize=`aws --output text ec2 describe-volumes --volume-ids $volumeid|awk '{print$4}'`
+    then
+         volsize=`aws ec2 describe-volumes --output text --volume-ids $volumeid|grep VOLUMES|awk '{print $5}'`
+         echo $volsize
+         volstatus=`aws ec2 describe-volumes --output text --volume-ids $volumeid|grep VOLUMES|awk '{print $7}'`
+          echo $volstatus
+          if [ $volstatus = "in-use" ]
+          then
+          echo "Currently $volumeid is in-use so cannot me used for backup"
+          exit 1
+          fi
+         if [ $volsize -lt $new_vol_gb ]
+         then
+         echo "Specified volume should have atleast $new_vol_gb space"
+         else
+         aws ec2 attach-volume --volume-id $volumeid --instance-id $instance --device $device_map > /dev/null
+         sleep 10
+         ssh -o StrictHostKeyChecking=no ${EC2_BACKUP_FLAGS_SSH} ubuntu@$aws_hostname sudo mkfs -t ext4 $device_map >/dev/null
+         ssh -o StrictHostKeyChecking=no ${EC2_BACKUP_FLAGS_SSH} ubuntu@$aws_hostname sudo mkdir /mount_data > /dev/null
+         ssh -o StrictHostKeyChecking=no ${EC2_BACKUP_FLAGS_SSH} ubuntu@$aws_hostname sudo mount $device_map /mount_data > /dev/null
 
-  echo $volsize
-  if [ $volsize -lt $new_vol_gb ]
-  then
-  echo "Specified volume should have atleast $new_vol_gb space"
-  else
-  aws ec2 attach-volume --volume-id $volumeid --instance-id $instance --device $device_map > /dev/null
-  sleep 10
-  fi
+ if [ $method = "dd" ]
+        then
+          echo "dd Function"
+          echo "Volume_Detach"
+          echo "Terminate_Instance"
+          echo $volumeid
+         else
+          echo "rsync"
+          echo "Volume_Detach"
+          echo "Terminate_Instance"
+          echo $volumeid
+ fi
+    fi
 else
 Volume_Attach
+     if [ $method = "dd" ]
+        then
+          echo "dd Function"
+          echo "Volume_Detach"
+          echo "Terminate_Instance"
+          echo $new_volumeid
+        else
+          echo "rsync Function"
+          echo "Volume_Detach"
+          echo "Terminate_Instance"
+          echo $new_volumeid
+     fi
 fi
-#rsync
-#sleep 100
-#Volume_Detach
-#Terminate_Instance
-echo $new_volume_id
