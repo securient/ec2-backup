@@ -2,7 +2,6 @@
 Instance_Creation()
 {
 image="ami-fce3c696"
-default_map=""
 username="ubuntu"
 location=""
 device_map="/dev/xvdf"
@@ -15,7 +14,7 @@ fi
 
 if [ -z "$EC2_BACKUP_FLAGS_SSH" ]
   then
-   echo "Environment variable is not set: $EC2_BACKUP_FLAGS_SSH"
+   echo "Please set the environment variable EC2_BACKUP_FLAGS_SSH as -i keyname.pem"
   exit 1
 fi
 
@@ -25,14 +24,16 @@ fi
 #fi
 
 instance=`aws ec2 run-instances --image-id ami-fce3c696 --instance-type t2.micro --key-name keyname --security-groups SN_2|grep INSTANCES|awk '{print $8}'`
+if [ $EC2_BACKUP_FLAGS_VERBOSE = "true" ]
+then
 echo "New Instance-Id is $instance"
+fi
 location=`aws ec2 describe-instances --output text --instance-id $instance|grep PLACEMENT|awk '{print $2}'`
+if [ $EC2_BACKUP_FLAGS_VERBOSE = "true" ]
+then
 echo "location is $location"
-default_map=`aws ec2 describe-instances --output text --instance-id $instance|grep BLOCKDEVICEMAPPINGS|awk '{print $2}'`
-echo "$instance is mapped to $default_map"
-sleep 50
-state=`aws ec2 describe-instances --output text --instance-id $instance|grep -i State|awk '{print $3}'`
-echo $state
+fi
+sleep 60
 state=`aws ec2 describe-instances --output text --instance-id $instance|grep -i State|awk '{print $3}'`
 echo $state
 aws_hostname=`aws ec2 describe-instances --instance-ids $instance|grep ASSOCIATION|awk '{print $3}'|awk 'NR==1'`
@@ -76,12 +77,11 @@ size=$(du -sb $directory|awk '{print $1}')
 new_vol=`expr $size \* 2`
 gb=`expr 1024 \* 1024 \* 1024`
 new_vol_gb=`expr $new_vol / $gb`
-echo $new_vol_gb
 if [ $new_vol_gb -lt 1 ]
 then
 new_vol_gb=1
 else
-new_vol_gb= $new_vol_gb
+new_vol_gb=$new_vol_gb
 fi
 }
 
@@ -96,9 +96,12 @@ volsize=`aws ec2 describe-volumes --output text --volume-ids $new_volume_id|awk 
 echo "The size is: $volsize"
 volstatus=`aws ec2 describe-volumes --output text --volume-ids $new_volume_id|awk '{print $6}'`
 echo "The Status is : $volstatus"
-ssh -o StrictHostKeyChecking=no ${EC2_BACKUP_FLAGS_SSH} ubuntu@$aws_hostname sudo mkfs -t ext4 $device_map > /dev/null
+echo "The directory is $directory"
+ssh -o StrictHostKeyChecking=no ${EC2_BACKUP_FLAGS_SSH} ubuntu@$aws_hostname sudo mkfs -t ext4 $device_map >/dev/null
 ssh -o StrictHostKeyChecking=no ${EC2_BACKUP_FLAGS_SSH} ubuntu@$aws_hostname sudo mkdir /mount_data > /dev/null
 ssh -o StrictHostKeyChecking=no ${EC2_BACKUP_FLAGS_SSH} ubuntu@$aws_hostname sudo mount $device_map /mount_data > /dev/null
+echo "Mounting is created"
+#`rsync -ravh --rsync-path="sudo rsync" -e "ssh $EC2_BACKUP_FLAGS_SSH -o StrictHostKeyChecking=no" $directory $ubuntu@aws_hostname:/mount_data` > /dev/null
 }
 
 Volume_Detach()
@@ -118,22 +121,44 @@ rsync()
 {
 if [ $method = "rsync" ]
 then
-echo $1
-`rsync -ravh --rsync-path="sudo rsync" -e "ssh $EC2_BACKUP_FLAGS_SSH -o StrictHostKeyChecking=no" $1 $ubuntu@aws_hostname:/mount_data` > /dev/null
+rsyncstatus=`rsync -ravv --rsync-path="sudo rsync" -e "ssh $EC2_BACKUP_FLAGS_SSH -o StrictHostKeyChecking=no" --delete $directory $ubuntu@aws_hostname:/mount_data 2>&1`
+#echo `rsync -ravh --rsync-path="sudo rsync" -e "ssh $EC2_BACKUP_FLAGS_SSH -o StrictHostKeyChecking=no" $directory $ubuntu@aws_hostname:/mount_data` > /dev/null
 else
- dd
+dd
 fi
 }
 
 dd()
 {
-echo $method
+if [ $method = "dd" ]
+then
+echo "Entered"
+var=`tar -Pcf - $directory | ssh \${EC2_BACKUP_FLAGS_SSH} -o StrictHostKeyChecking=no ubuntu@$aws_hostname 'sudo dd of=/dev/xvdf'`
+echo $var
+echo "dd Finished"
+fi
 }
 
 Instance_Creation
 Calculate_Size
+echo $volumeid
+if [ ! -z "$volumeid" ]
+then
+  volsize=`aws --output text ec2 describe-volumes --volume-ids $volumeid|awk '{print$4}'`
+
+  echo $volsize
+  if [ $volsize -lt $new_vol_gb ]
+  then
+  echo "Specified volume should have atleast $new_vol_gb space"
+  else
+  aws ec2 attach-volume --volume-id $volumeid --instance-id $instance --device $device_map > /dev/null
+  sleep 10
+  fi
+else
 Volume_Attach
-rsync
-Volume_Detach
-Terminate_Instance
+fi
+#rsync
+#sleep 100
+#Volume_Detach
+#Terminate_Instance
 echo $new_volume_id
