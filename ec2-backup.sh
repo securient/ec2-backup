@@ -7,7 +7,7 @@ location=""
 device_map="/dev/xvdf"
 verbose=false
 
-if [ ! -z "$EC2_BACKUP_FLAGS_VERBOSE" ]
+if [ ! -z "$EC2_BACKUP_VERBOSE" ]
 then
   verbose=true
 fi
@@ -35,13 +35,26 @@ Instance_Creation()
   then
     echo "location is $location"
   fi
-  sleep 60
-  state=`aws ec2 describe-instances --output text --instance-id $instance|grep -i State|awk '{print $3}'`
+
+  state=`eval "aws ec2 describe-instances --instance-ids $instance --query 'Reservations[0].Instances[0].State.Name'"`
+  while [[ ! $state =~ "running" ]]
+  do
+    sleep 4
+    state=`eval "aws ec2 describe-instances --instance-ids $instance --query 'Reservations[0].Instances[0].State.Name'"`
+    if [ "$verbose" = true ]
+    then
+      echo "Waiting for instance state $state to change to \"running\"."
+    fi
+  done
   if [ "$verbose" = true ]
   then
-    echo $state
+    echo "State changed to $state."
   fi
-  aws_hostname=`aws ec2 describe-instances --instance-ids $instance|grep ASSOCIATION|awk '{print $3}'|awk 'NR==1'`
+  aws_hostname=`eval "aws ec2 describe-instances --instance-ids $instance --query 'Reservations[0].Instances[0].PublicIpAddress'"`
+  if [ "$verbose" = true ]
+  then
+    echo "Public IP address: $aws_hostname"
+  fi
   if [ "$verbose" = true ]
   then
     echo $aws_hostname
