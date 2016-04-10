@@ -153,10 +153,10 @@ Volume_Attach()
 Volume_Detach()
 {
   ssh -o StrictHostKeyChecking=no ${EC2_BACKUP_FLAGS_SSH} ubuntu@$aws_hostname sudo umount /mount_data
-  aws ec2 detach-volume --volume-id $volumeid --output text >/dev/null
+  aws ec2 detach-volume --volume-id $new_volumeid --output text >/dev/null
   if [ "$verbose" = true ]
   then
-    echo "VOLUME $volumeid HAS BEEN DETACHED"
+    echo "VOLUME $new_volumeid HAS BEEN DETACHED"
   fi
 }
 
@@ -250,13 +250,16 @@ else
   then
     dd_backup
     echo "Volume_Detach"
+    Volume_Detach
     echo "Terminate_Instance"
+    Terminate_Instance
     echo $new_volumeid
   else
     rsync
-    echo "rsync Function"
     echo "Volume_Detach"
+    Volume_Detach
     echo "Terminate_Instance"
+    Terminate_Instance
     echo $new_volumeid
   fi
 fi
