@@ -36,21 +36,26 @@ Instance_Creation()
     echo "location is $location"
   fi
 
-  state=`eval "aws ec2 describe-instances --instance-ids $instance --query 'Reservations[0].Instances[0].State.Name'"`
-  while [[ ! $state =~ "running" ]]
-  do
-    sleep 4
-    state=`eval "aws ec2 describe-instances --instance-ids $instance --query 'Reservations[0].Instances[0].State.Name'"`
+  local COUNT=0
+  sleep 60
+  while [[ `aws ec2 describe-instances --filters "Name=instance-id, Values=$instance" --output text --query "Reservations[0].[Instances[0].State.Code]"` !=  16 ]]; do
+
     if [ "$verbose" = true ]
     then
-      echo "Waiting for instance state $state to change to \"running\"."
+      echo "Waiting for instance state to change to \"running\"."
+    fi
+    sleep 2
+    COUNT=`expr $COUNT + 1`
+    if [[ $COUNT -gt "30" ]]; then
+      print_err "Timeout: creating instance"
+      exit 1
     fi
   done
   if [ "$verbose" = true ]
   then
-    echo "State changed to $state."
+    echo "State changed to \"running\""
   fi
-  aws_hostname=`eval "aws ec2 describe-instances --instance-ids $instance --query 'Reservations[0].Instances[0].PublicIpAddress'"`
+  aws_hostname=`eval "aws ec2 describe-instances --instance-ids $instance --output text --query 'Reservations[0].Instances[0].PublicIpAddress'"`
   if [ "$verbose" = true ]
   then
     echo "Public IP address: $aws_hostname"
@@ -93,7 +98,7 @@ shift $(($OPTIND-1))
 directory=$1
 if [ ! -d "$directory" ]
 then
-  echo " $directory:No such directory exists"
+  echo " $directory: No such directory exists"
   exit 1
 fi
 
@@ -117,27 +122,34 @@ Calculate_Size()
   fi
 }
 
+FILE_SYSTEM_TYPE=ext4
+DEFAULT_VOLUME_DIR=/mount_data
+
 Volume_Attach()
 {
   new_volumeid=`aws ec2 create-volume --output text --availability-zone $location --size $new_vol_gb --volume-type gp2|awk '{print $7}'` >/dev/null
   sleep 10
   if [ "$verbose" = true ]
   then
-    echo "ATTACHED NEW VOLUME_ID IS $new_volumeid"
+    echo "Attached new volume_id is $new_volumeid"
   fi
   aws ec2 attach-volume --volume-id $new_volumeid --instance-id $instance --device $device_map > /dev/null
   sleep 05
   volsize=`aws ec2 describe-volumes --output text --volume-ids $new_volumeid|grep VOLUMES|awk '{print $5}'`
   if [ "$verbose" = true ]
   then
-    echo "NEW VOLUME $new_volumeid OF SIZE $volsize HAS BEEN ATTACHED TO $instance"
+    echo "New volume $new_volumeid of size $volsize GB has been attached to $instance"
   fi
   volstatus=`aws ec2 describe-volumes --output text --volume-ids $new_volumeid|grep ATTACHMENTS|awk '{print $6}'`
-  ssh -o StrictHostKeyChecking=no ${EC2_BACKUP_FLAGS_SSH} ubuntu@$aws_hostname sudo mkfs -t ext4 $device_map >/dev/null
-  ssh -o StrictHostKeyChecking=no ${EC2_BACKUP_FLAGS_SSH} ubuntu@$aws_hostname sudo mkdir /mount_data > /dev/null
-  ssh -o StrictHostKeyChecking=no ${EC2_BACKUP_FLAGS_SSH} ubuntu@$aws_hostname sudo mount $device_map /mount_data > /dev/null
+  # echo "ssh $EC2_BACKUP_FLAGS_SSH $username@$aws_hostname -o BatchMode=yes -o StrictHostKeyChecking=no \"sudo mkfs -t ext4 $device_map\""
+  # `eval "ssh $EC2_BACKUP_FLAGS_SSH $username@$aws_hostname -o BatchMode=yes -o StrictHostKeyChecking=no \"sudo mkdir /mount_data\""`
+  # `eval "ssh $EC2_BACKUP_FLAGS_SSH $username@$aws_hostname -o BatchMode=yes -o StrictHostKeyChecking=no \"sudo mount $device_map /mount_data\""`
+  ssh -o StrictHostKeyChecking=no -o BatchMode=yes $EC2_BACKUP_FLAGS_SSH ubuntu@$aws_hostname sudo mkfs -t ext4 $device_map >/dev/null
+  ssh -o StrictHostKeyChecking=no $EC2_BACKUP_FLAGS_SSH ubuntu@$aws_hostname sudo mkdir /mount_data > /dev/null
+  ssh -o StrictHostKeyChecking=no $EC2_BACKUP_FLAGS_SSH ubuntu@$aws_hostname sudo mount $device_map /mount_data > /dev/null
   #`rsync -ravh --rsync-path="sudo rsync" -e "ssh $EC2_BACKUP_FLAGS_SSH -o StrictHostKeyChecking=no" $directory $ubuntu@aws_hostname:/mount_data` > /dev/null
 }
+
 Volume_Detach()
 {
   ssh -o StrictHostKeyChecking=no ${EC2_BACKUP_FLAGS_SSH} ubuntu@$aws_hostname sudo umount /mount_data
@@ -147,6 +159,7 @@ Volume_Detach()
     echo "VOLUME $volumeid HAS BEEN DETACHED"
   fi
 }
+
 Terminate_Instance()
 {
   aws ec2 terminate-instances --instance-ids $instance >/dev/null
@@ -164,8 +177,8 @@ rsync()
     then
       echo "PERFORMING BACKUP OF DIRECTORY $directory WITH $method"
     fi
-    rsyncstatus=`rsync -ravv --rsync-path="sudo rsync" -e "ssh $EC2_BACKUP_FLAGS_SSH -o StrictHostKeyChecking=no" --delete $directory $ubuntu@aws_hostname:/mount_data 2>&1`
-    #echo `rsync -ravh --rsync-path="sudo rsync" -e "ssh $EC2_BACKUP_FLAGS_SSH -o StrictHostKeyChecking=no" $directory $ubuntu@aws_hostname:/mount_data` > /dev/null
+    echo "rsync -e \"ssh ${EC2_BACKUP_FLAGS_SSH}\" --rsync-path=\"sudo rsync\" -avpzh $directory $username@$aws_hostname:/mount_data"
+    rsync -e \"ssh ${EC2_BACKUP_FLAGS_SSH}\" --rsync-path=\"sudo rsync\" -avpzh $directory $username@$aws_hostname:/mount_data > /dev/null
   else
     if [ "$verbose" = true ]
     then
@@ -175,15 +188,10 @@ rsync()
   fi
 }
 
-dd()
-{
-  if [ $method = "dd" ]
-  then
-    echo "Entered"
-    var=`tar -Pcf - $directory | ssh \${EC2_BACKUP_FLAGS_SSH} -o StrictHostKeyChecking=no ubuntu@$aws_hostname 'sudo dd of=/dev/xvdf'`
-    echo $var
-    echo "dd Finished"
-  fi
+dd_backup() {
+    echo "Backing up by 'dd'"
+    tar -cPf - $directory | ssh ${EC2_BACKUP_FLAGS_SSH} -o BatchMode=yes -o StrictHostKeyChecking=no $username@$aws_hostname 'sudo dd of=/mount_data/backup.tar'
+    echo "Successfully backed up"
 }
 
 Instance_Creation
@@ -240,11 +248,12 @@ else
   Volume_Attach
   if [ $method = "dd" ]
   then
-    echo "dd Function"
+    dd_backup
     echo "Volume_Detach"
     echo "Terminate_Instance"
     echo $new_volumeid
   else
+    rsync
     echo "rsync Function"
     echo "Volume_Detach"
     echo "Terminate_Instance"
