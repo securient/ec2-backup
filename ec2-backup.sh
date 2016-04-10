@@ -229,14 +229,18 @@ then
 
     if [ $method = "dd" ]
     then
-      echo "dd Function"
+      dd_backup
       echo "Volume_Detach"
+      Volume_Detach
       echo "Terminate_Instance"
+      Terminate_Instance
       echo $volumeid
     else
-      echo "rsync"
+      rsync
       echo "Volume_Detach"
+      Volume_Detach
       echo "Terminate_Instance"
+      Terminate_Instance
       echo $volumeid
     fi
   fi
