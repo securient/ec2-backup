@@ -6,11 +6,14 @@ username="ubuntu"
 location=""
 device_map="/dev/xvdf"
 verbose=false
+FILE_SYSTEM_TYPE=ext4
+DEFAULT_VOLUME_DIR=/mount_data
 
-if [ ! -z "$EC2_BACKUP_VERBOSE" ]
-then
-  verbose=true
-fi
+verbose() {
+  if [[ ! -z $EC2_BACKUP_VERBOSE ]]; then
+    echo $@ >&2
+  fi
+}
 
 Instance_Creation()
 {
@@ -21,24 +24,19 @@ Instance_Creation()
   fi
 
   instance=`eval "aws ec2 run-instances --image-id $image $EC2_BACKUP_FLAGS_AWS --output text --query 'Instances[0].InstanceId'"`
-  if [ "$verbose" = true ]
+  if [ ! $? -eq 0 ]
   then
-    echo "New Instance-Id is $instance"
+    echo "Can not create and run the aws ec2 instance, please check your aws configuration."
+    exit 1
   fi
+  verbose "New Instance-Id is $instance"
   location=`aws ec2 describe-instances --output text --instance-id $instance|grep PLACEMENT|awk '{print $2}'`
-  if [ "$verbose" = true ]
-  then
-    echo "location is $location"
-  fi
+  verbose "location is $location"
 
   local COUNT=0
   sleep 60
   while [[ `aws ec2 describe-instances --filters "Name=instance-id, Values=$instance" --output text --query "Reservations[0].[Instances[0].State.Code]"` !=  16 ]]; do
-
-    if [ "$verbose" = true ]
-    then
-      echo "Waiting for instance state to change to \"running\"."
-    fi
+    verbose "Waiting for instance state to change to \"running\"."
     sleep 2
     COUNT=`expr $COUNT + 1`
     if [[ $COUNT -gt "30" ]]; then
@@ -46,26 +44,16 @@ Instance_Creation()
       exit 1
     fi
   done
-  if [ "$verbose" = true ]
-  then
-    echo "State changed to \"running\""
-  fi
+  verbose  "State changed to \"running\""
   aws_hostname=`eval "aws ec2 describe-instances --instance-ids $instance --output text --query 'Reservations[0].Instances[0].PublicIpAddress'"`
-  if [ "$verbose" = true ]
-  then
-    echo "Public IP address: $aws_hostname"
-  fi
-  if [ "$verbose" = true ]
-  then
-    echo $aws_hostname
-    echo "ssh -o StrictHostKeyChecking=no ${EC2_BACKUP_FLAGS_SSH} ubuntu@$aws_hostname"
-  fi
+  verbose "Public IP address: $aws_hostname"
 }
 
 ### Usage Function
 usage() {
   echo "ec2_backup [-h] [-m method] [-v volume-id] dir "
 }
+
 while getopts h:m:v: flag; do
   case "${flag}" in
     h) usage ;;
@@ -97,10 +85,7 @@ then
   exit 1
 fi
 
-if [ "$verbose" = true ]
-then
-  echo "Congrulations:You have selected $method method to backup directory $directory"
-fi
+verbose "Congrulations:You have selected $method method to backup directory $directory"
 
 # compute the size of directory in GB and then assign to Volume
 Calculate_Size()
@@ -117,145 +102,135 @@ Calculate_Size()
   fi
 }
 
-FILE_SYSTEM_TYPE=ext4
-DEFAULT_VOLUME_DIR=/mount_data
+volume_creation()
+{
+  new_volumeid=`aws ec2 create-volume --output text --availability-zone $location --size $new_vol_gb --volume-type gp2|awk '{print $7}'` >/dev/null
+  if [ ! $? -eq 0 ]
+  then
+    echo "Can not create and the aws ec2 volume, please check your aws configuration."
+    exit 1
+  fi
+  verbose "Attached new volume_id is $new_volumeid"
+  volumeid="$new_volumeid"
+  sleep 10
+}
 
 Volume_Attach()
 {
-  new_volumeid=`aws ec2 create-volume --output text --availability-zone $location --size $new_vol_gb --volume-type gp2|awk '{print $7}'` >/dev/null
-  sleep 10
-  if [ "$verbose" = true ]
-  then
-    echo "Attached new volume_id is $new_volumeid"
-  fi
-  aws ec2 attach-volume --volume-id $new_volumeid --instance-id $instance --device $device_map > /dev/null
+  aws ec2 attach-volume --volume-id $volumeid --instance-id $instance --device $device_map > /dev/null
   sleep 05
-  volsize=`aws ec2 describe-volumes --output text --volume-ids $new_volumeid|grep VOLUMES|awk '{print $5}'`
-  if [ "$verbose" = true ]
-  then
-    echo "New volume $new_volumeid of size $volsize GB has been attached to $instance"
-  fi
-  volstatus=`aws ec2 describe-volumes --output text --volume-ids $new_volumeid|grep ATTACHMENTS|awk '{print $6}'`
+  volsize=`aws ec2 describe-volumes --output text --volume-ids $volumeid|grep VOLUMES|awk '{print $5}'`
+  verbose "New volume $volumeid of size $volsize GB has been attached to $instance"
+  volstatus=`aws ec2 describe-volumes --output text --volume-ids $volumeid|grep ATTACHMENTS|awk '{print $6}'`
   ssh -o StrictHostKeyChecking=no -o BatchMode=yes $EC2_BACKUP_FLAGS_SSH ubuntu@$aws_hostname sudo mkfs -t ext4 $device_map >/dev/null
+  if [ ! $? -eq 0 ]
+  then
+    echo "Can not create the file system on the temporary ec2 instance."
+    echo "Please check if the environment variable \$EC2_BACKUP_FLAGS_SSH is set and the security group has access to the TCP port 22 on the instance."
+    Terminate_Instance
+    exit 1
+  fi
   ssh -o StrictHostKeyChecking=no $EC2_BACKUP_FLAGS_SSH ubuntu@$aws_hostname sudo mkdir /mount_data > /dev/null
+  if [ ! $? -eq 0 ]
+  then
+    echo "Can not create the file system on the temporary ec2 instance."
+    echo "Please check if the environment variable \$EC2_BACKUP_FLAGS_SSH is set and the security group has access to the TCP port 22 on the instance."
+    Terminate_Instance
+    exit 1
+  fi
   ssh -o StrictHostKeyChecking=no $EC2_BACKUP_FLAGS_SSH ubuntu@$aws_hostname sudo mount $device_map /mount_data > /dev/null
-  #`rsync -ravh --rsync-path="sudo rsync" -e "ssh $EC2_BACKUP_FLAGS_SSH -o StrictHostKeyChecking=no" $directory $ubuntu@aws_hostname:/mount_data` > /dev/null
+  if [ ! $? -eq 0 ]
+  then
+    echo "Can not create the file system on the temporary ec2 instance."
+    echo "Please check if the environment variable \$EC2_BACKUP_FLAGS_SSH is set and the security group has access to the TCP port 22 on the instance."
+    Terminate_Instance
+    exit 1
+  fi
 }
 
 Volume_Detach()
 {
   ssh -o StrictHostKeyChecking=no ${EC2_BACKUP_FLAGS_SSH} ubuntu@$aws_hostname sudo umount /mount_data
-  aws ec2 detach-volume --volume-id $new_volumeid --output text >/dev/null
-  if [ "$verbose" = true ]
+  aws ec2 detach-volume --volume-id $volumeid --output text >/dev/null
+  if [ ! $? -eq 0 ]
   then
-    echo "VOLUME $new_volumeid HAS BEEN DETACHED"
+    echo "Can not detach the volume."
+    exit 1
   fi
+  verbose "VOLUME $volumeid HAS BEEN DETACHED"
 }
 
 Terminate_Instance()
 {
   aws ec2 terminate-instances --instance-ids $instance >/dev/null
-  if [ "$verbose" = true ]
+  if [ ! $? -eq 0 ]
   then
-    echo "INSTANCE $instance HAS BEEN TERMINATED"
+    echo "Can not terminate the instance."
+    exit 1
   fi
+  verbose "INSTANCE $instance HAS BEEN TERMINATED"
 }
 
 rsync()
 {
   if [ $method = "rsync" ]
   then
-    if [ "$verbose" = true ]
-    then
-      echo "PERFORMING BACKUP OF DIRECTORY $directory WITH $method"
-    fi
+    verbose "PERFORMING BACKUP OF DIRECTORY $directory WITH $method"
     rsync -e \"ssh ${EC2_BACKUP_FLAGS_SSH}\" --rsync-path=\"sudo rsync\" -avpzh $directory $username@$aws_hostname:/mount_data > /dev/null
   else
-    if [ "$verbose" = true ]
-    then
-      echo "PERFORMING BACKUP OF DIRECTORY $directory WITH $method"
-    fi
+    verbose "PERFORMING BACKUP OF DIRECTORY $directory WITH $method"
     dd
   fi
 }
 
 dd_backup() {
-    echo "Backing up by 'dd'"
-    tar -cPf - $directory | ssh ${EC2_BACKUP_FLAGS_SSH} -o BatchMode=yes -o StrictHostKeyChecking=no $username@$aws_hostname 'sudo dd of=/mount_data/backup.tar'
-    echo "Successfully backed up"
+  verbose "Backing up by 'dd'"
+  tar -cPf - $directory | ssh ${EC2_BACKUP_FLAGS_SSH} -o BatchMode=yes -o StrictHostKeyChecking=no $username@$aws_hostname 'sudo dd of=/mount_data/backup.tar' >/dev/null 2>&1
+  verbose "Successfully backed up"
 }
 
 Instance_Creation
 Calculate_Size
-echo $volumeid
 if [ ! -z "$volumeid" ]
 then
   volsize=`aws ec2 describe-volumes --output text --volume-ids $volumeid|grep VOLUMES|awk '{print $5}'`
-  if [ "$verbose" = true ]
-  then
-    echo $volsize
-  fi
+  verbose "Volume size: $volsize GB"
   volstatus=`aws ec2 describe-volumes --output text --volume-ids $volumeid|grep VOLUMES|awk '{print $7}'`
-  if [ "$verbose" = true ]
-  then
-    echo $volstatus
-  fi
+  verbose "Volume status: $volstatus status"
   vollocation=`aws ec2 describe-volumes --output text --volume-ids $volumeid|grep VOLUMES|awk '{print $2}'`
   if [ $vollocation != "us-east-1d" ]
   then
     echo "Specified volume location should be from us-east-1d zone, but it belongs to $vollocation"
+    Terminate_Instance
     exit 1
   fi
   if [ $volstatus = "in-use" ]
   then
     echo "Currently $volumeid is in-use so cannot me used for backup"
+    Terminate_Instance
     exit 1
   fi
   if [ $volsize -lt $new_vol_gb ]
   then
-    echo "Specified volume should have atleast $new_vol_gb space"
+    echo "Specified volume should have at least $new_vol_gb space"
+    Terminate_Instance
     exit 1
-  else
-    aws ec2 attach-volume --volume-id $volumeid --instance-id $instance --device $device_map > /dev/null
-    sleep 10
-    ssh -o StrictHostKeyChecking=no -o BatchMode=yes $EC2_BACKUP_FLAGS_SSH ubuntu@$aws_hostname sudo mkfs -t ext4 $device_map >/dev/null
-    ssh -o StrictHostKeyChecking=no $EC2_BACKUP_FLAGS_SSH ubuntu@$aws_hostname sudo mkdir /mount_data > /dev/null
-    ssh -o StrictHostKeyChecking=no $EC2_BACKUP_FLAGS_SSH ubuntu@$aws_hostname sudo mount $device_map /mount_data > /dev/null
-
-
-    if [ $method = "dd" ]
-    then
-      dd_backup
-      echo "Volume_Detach"
-      aws ec2 detach-volume --volume-id $volumeid --output text >/dev/null
-      echo "Terminate_Instance"
-      Terminate_Instance
-      echo $volumeid
-    else
-      rsync
-      echo "Volume_Detach"
-      aws ec2 detach-volume --volume-id $volumeid --output text >/dev/null
-      echo "Terminate_Instance"
-      Terminate_Instance
-      echo $volumeid
-    fi
   fi
-else
   Volume_Attach
-  if [ $method = "dd" ]
-  then
-    dd_backup
-    echo "Volume_Detach"
-    Volume_Detach
-    echo "Terminate_Instance"
-    Terminate_Instance
-    echo $new_volumeid
-  else
-    rsync
-    echo "Volume_Detach"
-    Volume_Detach
-    echo "Terminate_Instance"
-    Terminate_Instance
-    echo $new_volumeid
-  fi
+else
+  volume_creation
+  Volume_Attach
+fi
+
+if [ $method = "dd" ]
+then
+  dd_backup
+  Volume_Detach
+  Terminate_Instance
+  echo $volumeid
+else
+  rsync
+  Volume_Detach
+  Terminate_Instance
+  echo $volumeid
 fi
