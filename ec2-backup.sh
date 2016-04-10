@@ -141,9 +141,6 @@ Volume_Attach()
     echo "New volume $new_volumeid of size $volsize GB has been attached to $instance"
   fi
   volstatus=`aws ec2 describe-volumes --output text --volume-ids $new_volumeid|grep ATTACHMENTS|awk '{print $6}'`
-  # echo "ssh $EC2_BACKUP_FLAGS_SSH $username@$aws_hostname -o BatchMode=yes -o StrictHostKeyChecking=no \"sudo mkfs -t ext4 $device_map\""
-  # `eval "ssh $EC2_BACKUP_FLAGS_SSH $username@$aws_hostname -o BatchMode=yes -o StrictHostKeyChecking=no \"sudo mkdir /mount_data\""`
-  # `eval "ssh $EC2_BACKUP_FLAGS_SSH $username@$aws_hostname -o BatchMode=yes -o StrictHostKeyChecking=no \"sudo mount $device_map /mount_data\""`
   ssh -o StrictHostKeyChecking=no -o BatchMode=yes $EC2_BACKUP_FLAGS_SSH ubuntu@$aws_hostname sudo mkfs -t ext4 $device_map >/dev/null
   ssh -o StrictHostKeyChecking=no $EC2_BACKUP_FLAGS_SSH ubuntu@$aws_hostname sudo mkdir /mount_data > /dev/null
   ssh -o StrictHostKeyChecking=no $EC2_BACKUP_FLAGS_SSH ubuntu@$aws_hostname sudo mount $device_map /mount_data > /dev/null
@@ -177,7 +174,6 @@ rsync()
     then
       echo "PERFORMING BACKUP OF DIRECTORY $directory WITH $method"
     fi
-    echo "rsync -e \"ssh ${EC2_BACKUP_FLAGS_SSH}\" --rsync-path=\"sudo rsync\" -avpzh $directory $username@$aws_hostname:/mount_data"
     rsync -e \"ssh ${EC2_BACKUP_FLAGS_SSH}\" --rsync-path=\"sudo rsync\" -avpzh $directory $username@$aws_hostname:/mount_data > /dev/null
   else
     if [ "$verbose" = true ]
