@@ -205,7 +205,7 @@ then
   then
     echo $volstatus
   fi
-  vollocation=`aws ec2 describe-volumes --output text --volume-ids vol-6c6e99bd|grep VOLUMES|awk '{print $2}'`
+  vollocation=`aws ec2 describe-volumes --output text --volume-ids $volumeid|grep VOLUMES|awk '{print $2}'`
   if [ $vollocation != "us-east-1d" ]
   then
     echo "Specified volume location should be from us-east-1d zone, but it belongs to $vollocation"
