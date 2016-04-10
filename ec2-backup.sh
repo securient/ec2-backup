@@ -20,11 +20,6 @@ Instance_Creation()
     exit 1
   fi
 
-  #if [ -z  $keypair ] || [  -z $secgroup  ]; then
-  # echo "The keypair or the security group are empty please set them in EC2_BACKUP_FLAGS_AWS" 1>&2
-  # exit 1
-  #fi
-
   instance=`eval "aws ec2 run-instances --image-id $image $EC2_BACKUP_FLAGS_AWS --output text --query 'Instances[0].InstanceId'"`
   if [ "$verbose" = true ]
   then
@@ -223,22 +218,23 @@ then
   else
     aws ec2 attach-volume --volume-id $volumeid --instance-id $instance --device $device_map > /dev/null
     sleep 10
-    ssh -o StrictHostKeyChecking=no ${EC2_BACKUP_FLAGS_SSH} ubuntu@$aws_hostname sudo mkfs -t ext4 $device_map >/dev/null
-    ssh -o StrictHostKeyChecking=no ${EC2_BACKUP_FLAGS_SSH} ubuntu@$aws_hostname sudo mkdir /mount_data > /dev/null
-    ssh -o StrictHostKeyChecking=no ${EC2_BACKUP_FLAGS_SSH} ubuntu@$aws_hostname sudo mount $device_map /mount_data > /dev/null
+    ssh -o StrictHostKeyChecking=no -o BatchMode=yes $EC2_BACKUP_FLAGS_SSH ubuntu@$aws_hostname sudo mkfs -t ext4 $device_map >/dev/null
+    ssh -o StrictHostKeyChecking=no $EC2_BACKUP_FLAGS_SSH ubuntu@$aws_hostname sudo mkdir /mount_data > /dev/null
+    ssh -o StrictHostKeyChecking=no $EC2_BACKUP_FLAGS_SSH ubuntu@$aws_hostname sudo mount $device_map /mount_data > /dev/null
+
 
     if [ $method = "dd" ]
     then
       dd_backup
       echo "Volume_Detach"
-      Volume_Detach
+      aws ec2 detach-volume --volume-id $volumeid --output text >/dev/null
       echo "Terminate_Instance"
       Terminate_Instance
       echo $volumeid
     else
       rsync
       echo "Volume_Detach"
-      Volume_Detach
+      aws ec2 detach-volume --volume-id $volumeid --output text >/dev/null
       echo "Terminate_Instance"
       Terminate_Instance
       echo $volumeid
