@@ -1,20 +1,19 @@
 #!/bin/bash
 
 method="dd"
-image="ami-fce3c696"
+image="ami-59d6f933"
 username="ubuntu"
 location=""
 device_map="/dev/xvdf"
-verbose_flag="False"
+verbose=false
+
+if [ ! -z "$EC2_BACKUP_FLAGS_VERBOSE" ]
+then
+  verbose=true
+fi
 
 Instance_Creation()
 {
-  if [ ! -z "$EC2_BACKUP_FLAGS_VERBOSE" ]
-  then
-    verbose_flag=$EC2_BACKUP_FLAGS_VERBOSE
-  fi
-  echo $verbose_flag
-
   if [ -z "$EC2_BACKUP_FLAGS_SSH" ]
   then
     echo "Please set the environment variable EC2_BACKUP_FLAGS_SSH as -i keyname.pem"
@@ -26,24 +25,24 @@ Instance_Creation()
   # exit 1
   #fi
 
-  instance=`aws ec2 run-instances --image-id ami-fce3c696 --instance-type t2.micro --key-name keyname --security-groups SN_2|grep INSTANCES|awk '{print $8}'`
-  if [ $EC2_BACKUP_FLAGS_VERBOSE = "true" ] || [ $EC2_BACKUP_FLAGS_VERBOSE = "TRUE" ]
+  instance=`eval "aws ec2 run-instances --image-id $image $EC2_BACKUP_FLAGS_AWS --output text --query 'Instances[0].InstanceId'"`
+  if [ "$verbose" = true ]
   then
     echo "New Instance-Id is $instance"
   fi
   location=`aws ec2 describe-instances --output text --instance-id $instance|grep PLACEMENT|awk '{print $2}'`
-  if [ $EC2_BACKUP_FLAGS_VERBOSE = "true" ] || [ $EC2_BACKUP_FLAGS_VERBOSE = "TRUE" ]
+  if [ "$verbose" = true ]
   then
     echo "location is $location"
   fi
   sleep 60
   state=`aws ec2 describe-instances --output text --instance-id $instance|grep -i State|awk '{print $3}'`
-  if [ $EC2_BACKUP_FLAGS_VERBOSE = "true" ] || [ $EC2_BACKUP_FLAGS_VERBOSE = "TRUE" ]
+  if [ "$verbose" = true ]
   then
     echo $state
   fi
   aws_hostname=`aws ec2 describe-instances --instance-ids $instance|grep ASSOCIATION|awk '{print $3}'|awk 'NR==1'`
-  if [ $EC2_BACKUP_FLAGS_VERBOSE = "true" ] || [ $EC2_BACKUP_FLAGS_VERBOSE = "TRUE" ]
+  if [ "$verbose" = true ]
   then
     echo $aws_hostname
     echo "ssh -o StrictHostKeyChecking=no ${EC2_BACKUP_FLAGS_SSH} ubuntu@$aws_hostname"
@@ -85,7 +84,7 @@ then
   exit 1
 fi
 
-if [ $EC2_BACKUP_FLAGS_VERBOSE = "true" ] || [ $EC2_BACKUP_FLAGS_VERBOSE = "TRUE" ]
+if [ "$verbose" = true ]
 then
   echo "Congrulations:You have selected $method method to backup directory $directory"
 fi
@@ -109,14 +108,14 @@ Volume_Attach()
 {
   new_volumeid=`aws ec2 create-volume --output text --availability-zone $location --size $new_vol_gb --volume-type gp2|awk '{print $7}'` >/dev/null
   sleep 10
-  if [ $EC2_BACKUP_FLAGS_VERBOSE = "true" ] || [ $EC2_BACKUP_FLAGS_VERBOSE = "TRUE" ]
+  if [ "$verbose" = true ]
   then
     echo "ATTACHED NEW VOLUME_ID IS $new_volumeid"
   fi
   aws ec2 attach-volume --volume-id $new_volumeid --instance-id $instance --device $device_map > /dev/null
   sleep 05
   volsize=`aws ec2 describe-volumes --output text --volume-ids $new_volumeid|grep VOLUMES|awk '{print $5}'`
-  if [ $EC2_BACKUP_FLAGS_VERBOSE = "true" ] || [ $EC2_BACKUP_FLAGS_VERBOSE = "TRUE" ]
+  if [ "$verbose" = true ]
   then
     echo "NEW VOLUME $new_volumeid OF SIZE $volsize HAS BEEN ATTACHED TO $instance"
   fi
@@ -130,7 +129,7 @@ Volume_Detach()
 {
   ssh -o StrictHostKeyChecking=no ${EC2_BACKUP_FLAGS_SSH} ubuntu@$aws_hostname sudo umount /mount_data
   aws ec2 detach-volume --volume-id $volumeid --output text >/dev/null
-  if [ $EC2_BACKUP_FLAGS_VERBOSE = "true" ] || [ $EC2_BACKUP_FLAGS_VERBOSE = "TRUE" ]
+  if [ "$verbose" = true ]
   then
     echo "VOLUME $volumeid HAS BEEN DETACHED"
   fi
@@ -138,7 +137,7 @@ Volume_Detach()
 Terminate_Instance()
 {
   aws ec2 terminate-instances --instance-ids $instance >/dev/null
-  if [ $EC2_BACKUP_FLAGS_VERBOSE = "true" ] || [ $EC2_BACKUP_FLAGS_VERBOSE = "TRUE" ]
+  if [ "$verbose" = true ]
   then
     echo "INSTANCE $instance HAS BEEN TERMINATED"
   fi
@@ -148,14 +147,14 @@ rsync()
 {
   if [ $method = "rsync" ]
   then
-    if [ $EC2_BACKUP_FLAGS_VERBOSE = "true" ]
+    if [ "$verbose" = true ]
     then
       echo "PERFORMING BACKUP OF DIRECTORY $directory WITH $method"
     fi
     rsyncstatus=`rsync -ravv --rsync-path="sudo rsync" -e "ssh $EC2_BACKUP_FLAGS_SSH -o StrictHostKeyChecking=no" --delete $directory $ubuntu@aws_hostname:/mount_data 2>&1`
     #echo `rsync -ravh --rsync-path="sudo rsync" -e "ssh $EC2_BACKUP_FLAGS_SSH -o StrictHostKeyChecking=no" $directory $ubuntu@aws_hostname:/mount_data` > /dev/null
   else
-    if [ $EC2_BACKUP_FLAGS_VERBOSE = "true" ] || [ $EC2_BACKUP_FLAGS_VERBOSE = "TRUE" ]
+    if [ "$verbose" = true ]
     then
       echo "PERFORMING BACKUP OF DIRECTORY $directory WITH $method"
     fi
@@ -180,12 +179,12 @@ echo $volumeid
 if [ ! -z "$volumeid" ]
 then
   volsize=`aws ec2 describe-volumes --output text --volume-ids $volumeid|grep VOLUMES|awk '{print $5}'`
-  if [ $EC2_BACKUP_FLAGS_VERBOSE = "true" ] || [ $EC2_BACKUP_FLAGS_VERBOSE = "TRUE" ]
+  if [ "$verbose" = true ]
   then
     echo $volsize
   fi
   volstatus=`aws ec2 describe-volumes --output text --volume-ids $volumeid|grep VOLUMES|awk '{print $7}'`
-  if [ $EC2_BACKUP_FLAGS_VERBOSE = "true" ] || [ $EC2_BACKUP_FLAGS_VERBOSE = "TRUE" ]
+  if [ "$verbose" = true ]
   then
     echo $volstatus
   fi
