@@ -19,6 +19,12 @@ Set the variable `EC2_BACKUP_VERBOSE` to produce verbose output(optional):
 
     export EC2_BACKUP_VERBOSE="true"
 
+After setting environment variables:
+
+    ./ec2-backup.sh <directory>
+    or
+    ./ec2-backup.sh -m <menthod(default is dd)> <directory>
+
 ---
 
 We implemented it by **bash** as bash is good at automating command line tasks. The program has 3 main parts: instance creation, volume creation/attaching and back-up functions.
