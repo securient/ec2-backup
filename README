@@ -1,11 +1,27 @@
 ec2-backup
+==========
 
 Teammates: Bipin Pandey <bpandey@stevens.edu>, Vinod Tiwari <vtiwari@stevens.edu>, Peixuan Ding <pding2@stevens.edu>
 
 A tool which performs a backup of a given directory to a data storage device in the cloud
 The tool will be executed on linux-lab.cs.stevens.edu.
 
-We implemented it by bash as it is good at automating command line tasks. The program has 3 main parts: instance creation, volume creation/attaching and back-up functions.
+Usage
+=====
+
+Make sure you have the following environment variables set:
+
+    export EC2_BACKUP_FLAGS_SSH="-i <YOUR PRIVATE KEY FILE PATH>"
+    export EC2_BACKUP_FLAGS_AWS="--security-groups <SECURITY GROUP NAME> --key-name <KEY PAIR NAME>"
+
+Set the variable `EC2_BACKUP_VERBOSE` to produce verbose output(optional):
+
+
+    export EC2_BACKUP_VERBOSE="true"
+
+---
+
+We implemented it by **bash** as bash is good at automating command line tasks. The program has 3 main parts: instance creation, volume creation/attaching and back-up functions.
 
 The problems that we ran into:
 
