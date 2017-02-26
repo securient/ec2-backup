@@ -33,3 +33,5 @@ The problems that we ran into:
 
 1. At first we can not make it to write a workable backing-up function, after some study we found that we need to specify the output of the dd command to a file on the mounted filesystem.
 2. After the creation of an instance, we can not manage to log in to the server via `ssh`. After debugging we found that this is because we need leave some time for the instance to get up and running, so we wrote some logics to wait for the instance status to be changed to `running` before the program perform any further operations.
+3. Unable to attach the instance to volume as they were created in different zone.
+4. Volume creation should be multiple of 1 i.e. 2.5GB will not work.
